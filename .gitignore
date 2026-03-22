@@ -7,4 +7,3 @@ coverage.json
 fhevmTemp/
 dist/
 .env
-package-lock.json
