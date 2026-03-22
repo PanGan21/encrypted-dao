@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 pragma solidity ^0.8.24;
 
-import {DAOUpgradeable} from "./DAOUpgradeable.sol";
+import {DAO} from "../dao/DAO.sol";
 
-/// @title DAOUpgradeableV2
+/// @title DAOV2
 /// @notice Example V2 upgrade of the DAO contract, demonstrating how to add
 /// new functionality while preserving existing state and permissions.
-contract DAOUpgradeableV2 is DAOUpgradeable {
+contract DAOV2 is DAO {
     /// @notice New permission for pausing the DAO (added in V2)
     bytes32 public constant PAUSE_PERMISSION_ID = keccak256("PAUSE_PERMISSION");
 

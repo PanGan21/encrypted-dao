@@ -2,28 +2,15 @@
 pragma solidity ^0.8.24;
 
 import {FHE, euint64, euint256, ebool, externalEuint256} from "@fhevm/solidity/lib/FHE.sol";
-import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
+import {ZamaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {IDAO} from "./IDAO.sol";
 import {ERC2771Context} from "./ERC2771Context.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// @title EncryptedMultisig
-/// @notice Aragon-style multisig plugin with full FHE privacy, on-chain encrypted
-/// calldata, identity-hiding proposals, and meta-transaction support.
-///
-/// ───── Privacy Model ─────
-///
-/// - **Private membership** — signer identities stored as encrypted booleans.
-///   Anyone can call approve(); non-signers silently contribute zero.
-/// - **Hidden approval count** — encrypted tally, only pass/fail revealed.
-/// - **On-chain encrypted calldata** — full proposal actions stored as euint256 chunks.
-///   Only signers who view/approve receive FHE.allow to decrypt.
-/// - **Identity-free proposals** — anyone can create proposals (no signer check).
-///   Non-signer proposals never reach threshold.
-/// - **Meta-transactions (EIP-2771)** — all operations use _msgSender() for caller
-///   privacy via trusted forwarder.
-///
-/// ──────────────────────────────────────────────────────────────────────
-contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
+/// @notice UUPS-upgradeable multisig plugin with full FHE privacy.
+contract EncryptedMultisig is Initializable, UUPSUpgradeable, ERC2771Context {
     uint256 public constant MAX_CALLDATA_CHUNKS = 24;
 
     // ──────────────────────────── Types ────────────────────────────
@@ -64,7 +51,7 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── State ────────────────────────────
 
-    IDAO public immutable dao;
+    IDAO public dao;
 
     uint256 public proposalCount;
     uint64 public threshold;
@@ -80,19 +67,26 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
     mapping(uint256 => euint256[]) private _encryptedChunks;
     mapping(uint256 => uint256[]) private _revealedChunks;
 
-    // ──────────────────────────── Constructor ────────────────────────────
+    // ──────────────────────────── Constructor & Initializer ────────────────────────────
 
-    constructor(
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() ERC2771Context(address(0)) {
+        _disableInitializers();
+    }
+
+    function initialize(
         IDAO _dao,
-        address[] memory _signers,
+        address[] calldata _signers,
         uint64 _threshold,
         uint64 _proposalDuration,
-        address trustedForwarder_
-    ) ERC2771Context(trustedForwarder_) {
+        address
+    ) external initializer {
         require(address(_dao) != address(0), "Invalid DAO");
         require(_signers.length > 0, "Need at least one signer");
         require(_threshold > 0 && _threshold <= _signers.length, "Invalid threshold");
         require(_proposalDuration > 0, "Invalid duration");
+
+        FHE.setCoprocessor(ZamaConfig.getEthereumCoprocessorConfig());
 
         dao = _dao;
         threshold = _threshold;
@@ -109,14 +103,17 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
         signerCount = _signers.length;
     }
 
+    /// @notice Required by UUPS — only DAO can authorize upgrades
+    function _authorizeUpgrade(address) internal view override {
+        require(msg.sender == address(dao), "Only via DAO");
+    }
+
+    function version() external pure virtual returns (uint256) {
+        return 1;
+    }
+
     // ──────────────────────────── Proposal Creation ────────────────────────────
 
-    /// @notice Create a multisig proposal with encrypted calldata on-chain.
-    /// @dev ANYONE can call — no signer check, no revert based on membership.
-    /// Non-signer proposals simply never reach the approval threshold.
-    /// @param encHandles Encrypted euint256 calldata chunks (ABI-encoded Action[])
-    /// @param inputProof Single proof for all encrypted inputs
-    /// @param cancelKeyHash keccak256(cancelKey) for identity-free cancellation
     function createProposal(
         bytes32[] calldata encHandles,
         bytes calldata inputProof,
@@ -160,8 +157,6 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Proposal Viewing ────────────────────────────
 
-    /// @notice Request decryption access to encrypted calldata chunks.
-    /// @dev Only signers can view (checked via internal flag).
     function viewProposal(uint256 proposalId) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         require(_isSigner[_msgSender()], "Not a signer");
@@ -179,8 +174,6 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Approval ────────────────────────────
 
-    /// @notice Approve a proposal. Anyone can call — non-signer approvals
-    /// silently add zero via homomorphic AND with encrypted signer flag.
     function approve(uint256 proposalId) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         Proposal storage p = _proposals[proposalId];
@@ -200,7 +193,6 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
         p.encryptedApprovals = FHE.add(p.encryptedApprovals, increment);
         FHE.allowThis(p.encryptedApprovals);
 
-        // Grant approver access to encrypted calldata
         euint256[] storage chunks = _encryptedChunks[proposalId];
         for (uint256 i; i < chunks.length; i++) {
             FHE.allow(chunks[i], sender);
@@ -272,7 +264,6 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Execution ────────────────────────────
 
-    /// @notice Execute a revealed proposal by reconstructing actions from chunks.
     function execute(uint256 proposalId, uint256 allowFailureMap) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         Proposal storage p = _proposals[proposalId];
@@ -301,7 +292,6 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Cancellation ────────────────────────────
 
-    /// @notice Cancel using the cancel key (identity-free).
     function cancel(uint256 proposalId, bytes32 cancelKey) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         Proposal storage p = _proposals[proposalId];

@@ -3,6 +3,17 @@ import { ethers, fhevm } from "hardhat";
 import type { DAO, EncryptedGovernanceToken, EncryptedTokenVoting } from "../types";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
+async function deployProxy(contractName: string, initArgs: unknown[]): Promise<string> {
+  const Impl = await ethers.getContractFactory(contractName);
+  const impl = await Impl.deploy();
+  await impl.waitForDeployment();
+  const initData = Impl.interface.encodeFunctionData("initialize", initArgs);
+  const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", { libraries: {} });
+  const proxy = await ERC1967Proxy.deploy(await impl.getAddress(), initData);
+  await proxy.waitForDeployment();
+  return await proxy.getAddress();
+}
+
 describe("EncryptedTokenVoting", function () {
   let dao: DAO;
   let token: EncryptedGovernanceToken;
@@ -18,40 +29,38 @@ describe("EncryptedTokenVoting", function () {
   beforeEach(async function () {
     [owner, alice] = await ethers.getSigners();
 
-    const DAO = await ethers.getContractFactory("DAO");
-    dao = (await DAO.deploy(owner.address, ethers.ZeroAddress)) as unknown as DAO;
-    await dao.waitForDeployment();
+    const daoProxy = await deployProxy("DAO", [owner.address, ethers.ZeroAddress]);
+    const DAOFactory = await ethers.getContractFactory("DAO");
+    dao = DAOFactory.attach(daoProxy) as unknown as DAO;
 
-    const Token = await ethers.getContractFactory("EncryptedGovernanceToken");
-    token = (await Token.deploy(
+    const tokenProxy = await deployProxy("EncryptedGovernanceToken", [
       "Gov Token",
       "GOV",
       ethers.ZeroAddress,
-    )) as unknown as EncryptedGovernanceToken;
-    await token.waitForDeployment();
+    ]);
+    const TokenFactory = await ethers.getContractFactory("EncryptedGovernanceToken");
+    token = TokenFactory.attach(tokenProxy) as unknown as EncryptedGovernanceToken;
 
-    const Voting = await ethers.getContractFactory("EncryptedTokenVoting");
-    voting = (await Voting.deploy(
-      await dao.getAddress(),
-      await token.getAddress(),
+    const votingProxy = await deployProxy("EncryptedTokenVoting", [
+      daoProxy,
+      tokenProxy,
       VOTING_DURATION,
       QUORUM_PCT,
       SUPPORT_PCT,
       MIN_PROPOSER_BALANCE,
       ethers.ZeroAddress,
-    )) as unknown as EncryptedTokenVoting;
-    await voting.waitForDeployment();
+    ]);
+    const VotingFactory = await ethers.getContractFactory("EncryptedTokenVoting");
+    voting = VotingFactory.attach(votingProxy) as unknown as EncryptedTokenVoting;
 
-    const votingAddress = await voting.getAddress();
-    await token.setSnapshotCreator(votingAddress, true);
+    await token.setSnapshotCreator(votingProxy, true);
 
-    const daoAddress = await dao.getAddress();
     const EXECUTE_PERMISSION_ID = await dao.EXECUTE_PERMISSION_ID();
-    await dao.grant(daoAddress, votingAddress, EXECUTE_PERMISSION_ID);
+    await dao.grant(daoProxy, votingProxy, EXECUTE_PERMISSION_ID);
   });
 
   describe("Deployment", function () {
-    it("should set immutable references correctly", async function () {
+    it("should set references correctly", async function () {
       expect(await voting.dao()).to.equal(await dao.getAddress());
       expect(await voting.governanceToken()).to.equal(await token.getAddress());
     });
@@ -72,9 +81,8 @@ describe("EncryptedTokenVoting", function () {
     });
 
     it("should revert with invalid DAO address", async function () {
-      const Voting = await ethers.getContractFactory("EncryptedTokenVoting");
       await expect(
-        Voting.deploy(
+        deployProxy("EncryptedTokenVoting", [
           ethers.ZeroAddress,
           await token.getAddress(),
           VOTING_DURATION,
@@ -82,14 +90,13 @@ describe("EncryptedTokenVoting", function () {
           SUPPORT_PCT,
           MIN_PROPOSER_BALANCE,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid DAO");
     });
 
     it("should revert with invalid token address", async function () {
-      const Voting = await ethers.getContractFactory("EncryptedTokenVoting");
       await expect(
-        Voting.deploy(
+        deployProxy("EncryptedTokenVoting", [
           await dao.getAddress(),
           ethers.ZeroAddress,
           VOTING_DURATION,
@@ -97,14 +104,13 @@ describe("EncryptedTokenVoting", function () {
           SUPPORT_PCT,
           MIN_PROPOSER_BALANCE,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid token");
     });
 
     it("should revert with zero voting duration", async function () {
-      const Voting = await ethers.getContractFactory("EncryptedTokenVoting");
       await expect(
-        Voting.deploy(
+        deployProxy("EncryptedTokenVoting", [
           await dao.getAddress(),
           await token.getAddress(),
           0,
@@ -112,14 +118,13 @@ describe("EncryptedTokenVoting", function () {
           SUPPORT_PCT,
           MIN_PROPOSER_BALANCE,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid voting duration");
     });
 
     it("should revert with invalid quorum percentage", async function () {
-      const Voting = await ethers.getContractFactory("EncryptedTokenVoting");
       await expect(
-        Voting.deploy(
+        deployProxy("EncryptedTokenVoting", [
           await dao.getAddress(),
           await token.getAddress(),
           VOTING_DURATION,
@@ -127,11 +132,11 @@ describe("EncryptedTokenVoting", function () {
           SUPPORT_PCT,
           MIN_PROPOSER_BALANCE,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid quorum");
 
       await expect(
-        Voting.deploy(
+        deployProxy("EncryptedTokenVoting", [
           await dao.getAddress(),
           await token.getAddress(),
           VOTING_DURATION,
@@ -139,7 +144,7 @@ describe("EncryptedTokenVoting", function () {
           SUPPORT_PCT,
           MIN_PROPOSER_BALANCE,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid quorum");
     });
   });
@@ -178,9 +183,5 @@ describe("EncryptedTokenVoting", function () {
       await token.mint(alice.address, 1000);
       expect(await token.totalSupply()).to.equal(1000);
     });
-
-    // Full proposal lifecycle tests (createProposal → vote → finalize → reveal → execute)
-    // require encrypted input creation via fhevm.createEncryptedInput().
-    // See test/EncryptedTokenVotingSepolia.ts for full integration tests.
   });
 });

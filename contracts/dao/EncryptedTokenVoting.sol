@@ -2,44 +2,18 @@
 pragma solidity ^0.8.24;
 
 import {FHE, euint64, euint256, ebool, externalEbool, externalEuint256} from "@fhevm/solidity/lib/FHE.sol";
-import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
+import {ZamaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {IDAO} from "./IDAO.sol";
 import {EncryptedGovernanceToken} from "./EncryptedGovernanceToken.sol";
 import {ERC2771Context} from "./ERC2771Context.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// @title EncryptedTokenVoting
-/// @notice Aragon-style token voting plugin with full FHE privacy, voting power
-/// snapshots, on-chain encrypted calldata, identity-hiding proposals, and
-/// meta-transaction support.
-///
-/// ───── Privacy Model ─────
-///
-/// - **Vote weight is hidden** — derived from snapshotted encrypted token balances.
-/// - **Vote direction is hidden** — encrypted booleans, tallied homomorphically.
-/// - **Tallies are hidden** — only pass/fail is revealed at finalization.
-/// - **Proposal content is on-chain but encrypted** — target, value, and full calldata
-///   are stored as encrypted euint256 chunks. Only members who call viewProposal()
-///   or vote() receive FHE.allow to decrypt.
-/// - **Proposer identity is hidden** — anyone can create proposals. Non-token-holder
-///   proposals simply never reach quorum. No revert leaks membership status.
-/// - **Caller identity is hidden** — EIP-2771 meta-transactions allow members to
-///   interact through a trusted forwarder without revealing their address.
-///
-/// ───── Lifecycle ─────
-///
-/// 1. createProposal() — submit encrypted calldata chunks (no identity check)
-/// 2. viewProposal()   — token holders decrypt proposal content before voting
-/// 3. vote()           — encrypted ballot weighted by snapshotted voting power
-/// 4. finalize()       — reveals only pass/fail via KMS
-/// 5. revealProposal() — decrypts all chunks for execution
-/// 6. execute()        — reconstructs actions from revealed chunks, calls DAO
-///
-/// ──────────────────────────────────────────────────────────────────────
-contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
+/// @notice UUPS-upgradeable token voting plugin with full FHE privacy.
+contract EncryptedTokenVoting is Initializable, UUPSUpgradeable, ERC2771Context {
     // ──────────────────────────── Constants ────────────────────────────
 
-    /// @notice Maximum number of 32-byte encrypted calldata chunks per proposal.
-    /// 24 chunks = 768 bytes, enough for most governance actions.
     uint256 public constant MAX_CALLDATA_CHUNKS = 24;
 
     // ──────────────────────────── Types ────────────────────────────
@@ -55,28 +29,22 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
     }
 
     struct ProposalParams {
-        uint64 startDate; // 0 = now
-        uint64 endDate; // 0 = now + votingDuration
+        uint64 startDate;
+        uint64 endDate;
     }
 
     struct Proposal {
-        // Snapshot
         uint256 snapshotId;
-        // Timing
         uint64 voteStart;
         uint64 voteEnd;
-        // Encrypted tallies (token-weighted)
         euint64 encryptedForVotes;
         euint64 encryptedAgainstVotes;
-        // Calldata chunks
         uint256 chunkCount;
-        // State
         bool finalized;
         bool resultApproved;
         bool revealed;
         bool executed;
         bool cancelled;
-        // Cancellation
         bytes32 cancelKeyHash;
     }
 
@@ -92,40 +60,43 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── State ────────────────────────────
 
-    IDAO public immutable dao;
-    EncryptedGovernanceToken public immutable governanceToken;
+    IDAO public dao;
+    EncryptedGovernanceToken public governanceToken;
 
     uint256 public proposalCount;
     uint64 public votingDuration;
-    uint64 public minQuorumPct; // 1-100
-    uint64 public minSupportPct; // 1-100
+    uint64 public minQuorumPct;
+    uint64 public minSupportPct;
     uint64 public minProposerBalance;
 
     mapping(uint256 => Proposal) private _proposals;
     mapping(uint256 => mapping(address => bool)) private _hasVoted;
-
-    /// @dev Encrypted calldata chunks per proposal: proposalId => chunk[]
     mapping(uint256 => euint256[]) private _encryptedChunks;
-
-    /// @dev Revealed plaintext chunks per proposal: proposalId => chunk[]
     mapping(uint256 => uint256[]) private _revealedChunks;
 
-    // ──────────────────────────── Constructor ────────────────────────────
+    // ──────────────────────────── Constructor & Initializer ────────────────────────────
 
-    constructor(
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() ERC2771Context(address(0)) {
+        _disableInitializers();
+    }
+
+    function initialize(
         IDAO _dao,
         EncryptedGovernanceToken _token,
         uint64 _votingDuration,
         uint64 _minQuorumPct,
         uint64 _minSupportPct,
         uint64 _minProposerBalance,
-        address trustedForwarder_
-    ) ERC2771Context(trustedForwarder_) {
+        address
+    ) external initializer {
         require(address(_dao) != address(0), "Invalid DAO");
         require(address(_token) != address(0), "Invalid token");
         require(_votingDuration > 0, "Invalid voting duration");
         require(_minQuorumPct > 0 && _minQuorumPct <= 100, "Invalid quorum");
         require(_minSupportPct > 0 && _minSupportPct <= 100, "Invalid support");
+
+        FHE.setCoprocessor(ZamaConfig.getEthereumCoprocessorConfig());
 
         dao = _dao;
         governanceToken = _token;
@@ -135,23 +106,17 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
         minProposerBalance = _minProposerBalance;
     }
 
+    /// @notice Required by UUPS — only DAO can authorize upgrades
+    function _authorizeUpgrade(address) internal view override {
+        require(msg.sender == address(dao), "Only via DAO");
+    }
+
+    function version() external pure virtual returns (uint256) {
+        return 1;
+    }
+
     // ──────────────────────────── Proposal Creation ────────────────────────────
 
-    /// @notice Create a proposal with encrypted calldata stored on-chain.
-    /// @dev ANYONE can call — no identity check, no revert based on membership.
-    /// Non-token-holder proposals simply never reach quorum.
-    ///
-    /// The `encHandles` array contains all encrypted inputs in order:
-    ///   encHandles[0..chunkCount-1] = encrypted euint256 calldata chunks
-    ///
-    /// The chunks are the ABI-encoded `IDAO.Action[]`, split into 32-byte segments.
-    /// Client-side: `abi.encode(actions)` → pad to 32-byte boundary → split → encrypt.
-    ///
-    /// @param encHandles Array of encrypted handles (calldata chunks as bytes32)
-    /// @param inputProof Single proof covering all encrypted inputs
-    /// @param cancelKeyHash keccak256(cancelKey) — used for cancellation (identity-free)
-    /// @param params Optional start/end dates
-    /// @return proposalId The new proposal's ID
     function createProposal(
         bytes32[] calldata encHandles,
         bytes calldata inputProof,
@@ -168,7 +133,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
         address sender = _msgSender();
 
-        // Process encrypted chunks
         for (uint256 i; i < chunkCount; i++) {
             euint256 chunk = FHE.fromExternal(externalEuint256.wrap(encHandles[i]), inputProof);
             FHE.allowThis(chunk);
@@ -176,7 +140,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
             _encryptedChunks[proposalId].push(chunk);
         }
 
-        // Create voting power snapshot
         uint256 snapshotId = governanceToken.createSnapshot();
 
         euint64 zeroFor = FHE.asEuint64(0);
@@ -208,8 +171,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Proposal Viewing ────────────────────────────
 
-    /// @notice Request decryption access to a proposal's encrypted calldata chunks.
-    /// @dev Token holders can view before voting. Grants FHE.allow on all chunks.
     function viewProposal(uint256 proposalId) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         require(governanceToken.isTokenHolder(_msgSender()), "Not a token holder");
@@ -227,9 +188,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Voting ────────────────────────────
 
-    /// @notice Cast an encrypted, token-weighted vote using snapshotted voting power.
-    /// @dev Anyone can call — zero-balance voters contribute zero weight.
-    /// Uses voting power snapshotted at proposal creation, preventing "vote and dump".
     function vote(uint256 proposalId, externalEbool encryptedVote, bytes calldata inputProof) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         Proposal storage p = _proposals[proposalId];
@@ -242,7 +200,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
         ebool voteChoice = FHE.fromExternal(encryptedVote, inputProof);
 
-        // Use SNAPSHOTTED voting power (locked at proposal creation)
         euint64 voterWeight = governanceToken.getSnapshotVotingPower(p.snapshotId, sender);
         euint64 zero = FHE.asEuint64(0);
 
@@ -255,7 +212,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
         FHE.allowThis(p.encryptedForVotes);
         FHE.allowThis(p.encryptedAgainstVotes);
 
-        // Grant voter access to all encrypted chunks
         euint256[] storage chunks = _encryptedChunks[proposalId];
         for (uint256 i; i < chunks.length; i++) {
             FHE.allow(chunks[i], sender);
@@ -266,7 +222,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Finalization ────────────────────────────
 
-    /// @notice Finalize: check quorum + majority homomorphically, reveal pass/fail.
     function finalize(
         uint256 proposalId,
         bytes calldata decryptionProof,
@@ -301,8 +256,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Reveal ────────────────────────────
 
-    /// @notice Reveal all encrypted calldata chunks after approval.
-    /// Decrypts via KMS and stores plaintext for execution.
     function revealProposal(
         uint256 proposalId,
         bytes calldata decryptionProof,
@@ -317,7 +270,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
         euint256[] storage chunks = _encryptedChunks[proposalId];
         uint256 count = chunks.length;
 
-        // Make all chunks publicly decryptable
         bytes32[] memory handlesList = new bytes32[](count);
         for (uint256 i; i < count; i++) {
             FHE.makePubliclyDecryptable(chunks[i]);
@@ -326,7 +278,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
         FHE.checkSignatures(handlesList, abiEncodedCleartexts, decryptionProof);
 
-        // Decode all chunk values
         uint256[] memory values = abi.decode(abiEncodedCleartexts, (uint256[]));
         require(values.length == count, "Chunk count mismatch");
 
@@ -340,8 +291,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Execution ────────────────────────────
 
-    /// @notice Execute a revealed proposal.
-    /// Reconstructs the ABI-encoded actions from revealed chunks and calls DAO.execute().
     function execute(uint256 proposalId, uint256 allowFailureMap) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         Proposal storage p = _proposals[proposalId];
@@ -351,7 +300,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
         p.executed = true;
 
-        // Reconstruct bytes from revealed chunks
         uint256[] storage chunks = _revealedChunks[proposalId];
         uint256 count = chunks.length;
         bytes memory encodedActions = new bytes(count * 32);
@@ -363,9 +311,7 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
             }
         }
 
-        // Decode the ABI-encoded Action[]
         IDAO.Action[] memory actions = abi.decode(encodedActions, (IDAO.Action[]));
-
         dao.execute(bytes32(proposalId), actions, allowFailureMap);
 
         emit ProposalExecuted(proposalId);
@@ -373,9 +319,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Cancellation ────────────────────────────
 
-    /// @notice Cancel a proposal using the cancel key (identity-free).
-    /// @param proposalId The proposal to cancel
-    /// @param cancelKey The plaintext key whose keccak256 matches the stored hash
     function cancel(uint256 proposalId, bytes32 cancelKey) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         Proposal storage p = _proposals[proposalId];
@@ -434,7 +377,6 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
         );
     }
 
-    /// @notice Get revealed calldata chunks (only after reveal)
     function getRevealedChunks(uint256 proposalId) external view returns (uint256[] memory) {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         require(_proposals[proposalId].revealed, "Not revealed");

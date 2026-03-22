@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 pragma solidity ^0.8.24;
 
-import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {IDAO} from "./IDAO.sol";
 import {ERC2771Context} from "./ERC2771Context.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// @title DAO
-/// @notice Core DAO contract: treasury, batched action execution, role-based permissions.
-/// Supports EIP-2771 meta-transactions so callers can interact via a trusted forwarder
-/// without revealing their address on-chain.
-contract DAO is IDAO, ERC2771Context, ZamaEthereumConfig {
+/// @notice UUPS-upgradeable core DAO contract.
+/// Supports treasury management, batched action execution, role-based permissions,
+/// and contract upgrades via UUPS proxy pattern.
+contract DAO is Initializable, UUPSUpgradeable, IDAO, ERC2771Context {
     bytes32 public constant EXECUTE_PERMISSION_ID = keccak256("EXECUTE_PERMISSION");
     bytes32 public constant ROOT_PERMISSION_ID = keccak256("ROOT_PERMISSION");
+    bytes32 public constant UPGRADE_PERMISSION_ID = keccak256("UPGRADE_PERMISSION");
 
     event PermissionChanged(bytes32 indexed permissionId);
 
@@ -22,12 +24,21 @@ contract DAO is IDAO, ERC2771Context, ZamaEthereumConfig {
         _;
     }
 
-    /// @param initialOwner Address that receives ROOT_PERMISSION
-    /// @param trustedForwarder_ EIP-2771 trusted forwarder (address(0) to disable)
-    constructor(address initialOwner, address trustedForwarder_) ERC2771Context(trustedForwarder_) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() ERC2771Context(address(0)) {
+        _disableInitializers();
+    }
+
+    /// @notice Initialize the DAO (replaces constructor for proxy deployments)
+    /// @param initialOwner Address that receives ROOT_PERMISSION and UPGRADE_PERMISSION
+    function initialize(address initialOwner, address) external initializer {
         require(initialOwner != address(0), "DAO: zero address owner");
         _grant(address(this), initialOwner, ROOT_PERMISSION_ID);
+        _grant(address(this), initialOwner, UPGRADE_PERMISSION_ID);
     }
+
+    /// @notice Required by UUPS — only UPGRADE_PERMISSION holders can upgrade
+    function _authorizeUpgrade(address newImplementation) internal override auth(UPGRADE_PERMISSION_ID) {}
 
     /// @inheritdoc IDAO
     function execute(
@@ -76,6 +87,11 @@ contract DAO is IDAO, ERC2771Context, ZamaEthereumConfig {
     /// @inheritdoc IDAO
     function hasPermission(address where, address who, bytes32 permissionId) external view override returns (bool) {
         return _permissions[_permissionHash(where, who, permissionId)];
+    }
+
+    /// @notice Returns the implementation version (useful for verifying upgrades)
+    function version() external pure virtual returns (uint256) {
+        return 1;
     }
 
     function _grant(address where, address who, bytes32 permissionId) internal {

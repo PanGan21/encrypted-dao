@@ -3,6 +3,17 @@ import { ethers, fhevm } from "hardhat";
 import type { EncryptedGovernanceToken } from "../types";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
+async function deployProxy(contractName: string, initArgs: unknown[]): Promise<string> {
+  const Impl = await ethers.getContractFactory(contractName);
+  const impl = await Impl.deploy();
+  await impl.waitForDeployment();
+  const initData = Impl.interface.encodeFunctionData("initialize", initArgs);
+  const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", { libraries: {} });
+  const proxy = await ERC1967Proxy.deploy(await impl.getAddress(), initData);
+  await proxy.waitForDeployment();
+  return await proxy.getAddress();
+}
+
 describe("EncryptedGovernanceToken", function () {
   let token: EncryptedGovernanceToken;
   let owner: HardhatEthersSigner;
@@ -12,13 +23,13 @@ describe("EncryptedGovernanceToken", function () {
 
   beforeEach(async function () {
     [owner, alice, bob, snapshotCreator] = await ethers.getSigners();
-    const Token = await ethers.getContractFactory("EncryptedGovernanceToken");
-    token = (await Token.deploy(
+    const proxyAddr = await deployProxy("EncryptedGovernanceToken", [
       "Encrypted Gov Token",
       "eGOV",
       ethers.ZeroAddress,
-    )) as unknown as EncryptedGovernanceToken;
-    await token.waitForDeployment();
+    ]);
+    const Token = await ethers.getContractFactory("EncryptedGovernanceToken");
+    token = Token.attach(proxyAddr) as unknown as EncryptedGovernanceToken;
   });
 
   describe("Deployment", function () {

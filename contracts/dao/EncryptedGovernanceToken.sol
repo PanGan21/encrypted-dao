@@ -2,26 +2,15 @@
 pragma solidity ^0.8.24;
 
 import {FHE, euint64, ebool, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
-import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
+import {ZamaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {ERC2771Context} from "./ERC2771Context.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /// @title EncryptedGovernanceToken
-/// @notice ERC20-like governance token with encrypted balances, voting power snapshots,
-/// delegation, and meta-transaction support.
-///
-/// Privacy: All balances, allowances, and voting power are encrypted (`euint64`).
-/// Only totalSupply is public (needed for quorum calculations).
-///
-/// Snapshots: Voting power is checkpoint-based. When a voting plugin creates a
-/// snapshot, the token records voting power before any subsequent modification.
-/// This prevents "vote and dump" attacks — voters' power is locked at proposal
-/// creation time, not read at vote time.
-///
-/// Meta-transactions (EIP-2771): All identity-sensitive operations use _msgSender()
-/// so members can interact via a trusted forwarder without revealing their address.
-/// Note: Functions accepting raw encrypted handles (euint64 parameters) still require
-/// direct calls since FHE.isSenderAllowed checks msg.sender.
-contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
+/// @notice UUPS-upgradeable ERC20-like governance token with encrypted balances,
+/// voting power snapshots, delegation, and meta-transaction support.
+contract EncryptedGovernanceToken is Initializable, UUPSUpgradeable, ERC2771Context {
     // ──────────────────────────── Events ────────────────────────────
 
     event Transfer(address indexed from, address indexed to);
@@ -63,30 +52,41 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         _;
     }
 
-    // ──────────────────────────── Constructor ────────────────────────────
+    // ──────────────────────────── Constructor & Initializer ────────────────────────────
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() ERC2771Context(address(0)) {
+        _disableInitializers();
+    }
+
+    /// @notice Initialize the token (replaces constructor for proxy deployments)
     /// @param name_ Token name
     /// @param symbol_ Token symbol
-    /// @param trustedForwarder_ EIP-2771 trusted forwarder (address(0) to disable)
-    constructor(
-        string memory name_,
-        string memory symbol_,
-        address trustedForwarder_
-    ) ERC2771Context(trustedForwarder_) {
+    function initialize(string memory name_, string memory symbol_, address) external initializer {
+        FHE.setCoprocessor(ZamaConfig.getEthereumCoprocessorConfig());
         name = name_;
         symbol = symbol_;
         owner = msg.sender;
     }
 
+    function confidentialProtocolId() public view returns (uint256) {
+        return ZamaConfig.getConfidentialProtocolId();
+    }
+
+    /// @notice Required by UUPS — only owner can authorize upgrades
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    /// @notice Returns the implementation version
+    function version() external pure virtual returns (uint256) {
+        return 1;
+    }
+
     // ──────────────────────────── Snapshot Management ────────────────────────────
 
-    /// @notice Authorize an address to create snapshots (e.g. a voting plugin).
     function setSnapshotCreator(address creator, bool authorized) external onlyOwner {
         isSnapshotCreator[creator] = authorized;
     }
 
-    /// @notice Create a new voting power snapshot. Returns the snapshot ID.
-    /// @dev Called by voting plugins at proposal creation time.
     function createSnapshot() external returns (uint256) {
         require(isSnapshotCreator[msg.sender], "Not authorized to snapshot");
         currentSnapshotId++;
@@ -94,16 +94,11 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return currentSnapshotId;
     }
 
-    /// @notice Get voting power at a specific snapshot.
-    /// @dev Returns the power recorded at the latest checkpoint at or before snapshotId.
-    /// If no checkpoint exists, returns current power (account was never modified).
-    /// Grants transient ACL access to msg.sender (the calling plugin contract).
     function getSnapshotVotingPower(uint256 snapshotId, address account) external returns (euint64) {
         require(snapshotId > 0 && snapshotId <= currentSnapshotId, "Invalid snapshot");
 
         VotingPowerCheckpoint[] storage ckpts = _vpCheckpoints[account];
 
-        // Search backwards for the latest checkpoint at or before snapshotId
         for (uint256 i = ckpts.length; i > 0; i--) {
             if (ckpts[i - 1].snapshotId <= snapshotId) {
                 euint64 snapshotPower = ckpts[i - 1].power;
@@ -112,8 +107,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
             }
         }
 
-        // No checkpoint: account was never modified after any snapshot was created.
-        // Current power is the correct historical value for all past snapshots.
         euint64 currentPower = _votingPower[account];
         FHE.allowTransient(currentPower, msg.sender);
         return currentPower;
@@ -151,7 +144,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return _balances[account];
     }
 
-    /// @notice Transfer (encrypted amount from external input) — meta-tx compatible
     function transfer(address to, externalEuint64 encryptedAmount, bytes calldata inputProof) external returns (bool) {
         euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         ebool canTransfer = FHE.le(amount, _balances[_msgSender()]);
@@ -159,7 +151,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return true;
     }
 
-    /// @notice Transfer (raw handle) — NOT meta-tx compatible (FHE.isSenderAllowed checks msg.sender)
     function transfer(address to, euint64 amount) public returns (bool) {
         require(FHE.isSenderAllowed(amount));
         ebool canTransfer = FHE.le(amount, _balances[msg.sender]);
@@ -167,7 +158,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return true;
     }
 
-    /// @notice Approve (encrypted amount from external input) — meta-tx compatible
     function approve(
         address spender,
         externalEuint64 encryptedAmount,
@@ -179,7 +169,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return true;
     }
 
-    /// @notice Approve (raw handle) — NOT meta-tx compatible
     function approve(address spender, euint64 amount) public returns (bool) {
         require(FHE.isSenderAllowed(amount));
         _approve(msg.sender, spender, amount);
@@ -191,7 +180,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return _allowances[tokenOwner][spender];
     }
 
-    /// @notice TransferFrom (encrypted amount) — meta-tx compatible
     function transferFrom(
         address from,
         address to,
@@ -204,7 +192,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return true;
     }
 
-    /// @notice TransferFrom (raw handle) — NOT meta-tx compatible
     function transferFrom(address from, address to, euint64 amount) public returns (bool) {
         require(FHE.isSenderAllowed(amount));
         ebool isTransferable = _updateAllowance(from, msg.sender, amount);
@@ -214,7 +201,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
 
     // ──────────────────────────── Voting Power (current) ────────────────────────────
 
-    /// @notice Get current voting power (for non-snapshot queries).
     function getVotingPower(address account) external returns (euint64) {
         euint64 power = _votingPower[account];
         FHE.allowTransient(power, msg.sender);
@@ -234,7 +220,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
 
         euint64 voterBalance = _balances[sender];
 
-        // Snapshot both delegates before modification
         _snapshotVotingPower(currentDelegate);
         _snapshotVotingPower(delegatee);
 
@@ -257,9 +242,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         return d == address(0) ? account : d;
     }
 
-    /// @dev Snapshot voting power for `account` before modification.
-    /// Records the current (pre-change) power at the current snapshot ID.
-    /// Only records once per snapshot ID per account (first write wins).
     function _snapshotVotingPower(address account) internal {
         if (currentSnapshotId == 0) return;
 
@@ -284,7 +266,6 @@ contract EncryptedGovernanceToken is ERC2771Context, ZamaEthereumConfig {
         FHE.allowThis(newBalanceFrom);
         FHE.allow(newBalanceFrom, from);
 
-        // Snapshot both delegates before modifying voting power
         address fromDelegate = _getDelegate(from);
         address toDelegate = _getDelegate(to);
 

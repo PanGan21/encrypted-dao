@@ -1,9 +1,9 @@
 import { expect } from "chai";
 import { ethers, fhevm } from "hardhat";
 import type {
-  DAOUpgradeable,
-  DAOUpgradeableV2,
-  EncryptedGovernanceTokenUpgradeable,
+  DAO,
+  DAOV2,
+  EncryptedGovernanceToken,
   EncryptedTokenVoting,
 } from "../types";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
@@ -12,7 +12,7 @@ import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signer
  * E2E tests for the Encrypted DAO running against a local Hardhat chain
  * with FHE mock mode. Covers:
  *
- * 1. Proxy deployment (UUPS) of DAO and Token
+ * 1. Proxy deployment (UUPS) of DAO, Token, and Voting
  * 2. Token minting and delegation
  * 3. Proposal creation, voting, finalization, reveal, and execution
  * 4. DAO upgrade through governance (V1 → V2)
@@ -22,8 +22,8 @@ describe("E2E: Encrypted DAO (local chain)", function () {
   // Increase timeout for FHE mock operations
   this.timeout(120_000);
 
-  let dao: DAOUpgradeable;
-  let token: EncryptedGovernanceTokenUpgradeable;
+  let dao: DAO;
+  let token: EncryptedGovernanceToken;
   let voting: EncryptedTokenVoting;
   let owner: HardhatEthersSigner;
   let alice: HardhatEthersSigner;
@@ -32,6 +32,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
 
   let daoProxy: string;
   let tokenProxy: string;
+  let votingProxy: string;
 
   const VOTING_DURATION = 60; // 60 seconds for testing
   const QUORUM_PCT = 20;
@@ -52,12 +53,10 @@ describe("E2E: Encrypted DAO (local chain)", function () {
 
   describe("1. Proxy Deployment", function () {
     it("should deploy DAO via ERC1967 proxy", async function () {
-      // Deploy implementation
-      const DAOImpl = await ethers.getContractFactory("DAOUpgradeable");
+      const DAOImpl = await ethers.getContractFactory("DAO");
       const daoImpl = await DAOImpl.deploy();
       await daoImpl.waitForDeployment();
 
-      // Deploy proxy
       const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", {
         libraries: {},
       });
@@ -69,16 +68,15 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       await proxy.waitForDeployment();
 
       daoProxy = await proxy.getAddress();
-      dao = DAOImpl.attach(daoProxy) as unknown as DAOUpgradeable;
+      dao = DAOImpl.attach(daoProxy) as unknown as DAO;
 
-      // Verify initialization
       const ROOT_PERMISSION_ID = await dao.ROOT_PERMISSION_ID();
       expect(await dao.hasPermission(daoProxy, owner.address, ROOT_PERMISSION_ID)).to.be.true;
       expect(await dao.version()).to.equal(1);
     });
 
     it("should deploy GovernanceToken via ERC1967 proxy", async function () {
-      const TokenImpl = await ethers.getContractFactory("EncryptedGovernanceTokenUpgradeable");
+      const TokenImpl = await ethers.getContractFactory("EncryptedGovernanceToken");
       const tokenImpl = await TokenImpl.deploy();
       await tokenImpl.waitForDeployment();
 
@@ -94,7 +92,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       await proxy.waitForDeployment();
 
       tokenProxy = await proxy.getAddress();
-      token = TokenImpl.attach(tokenProxy) as unknown as EncryptedGovernanceTokenUpgradeable;
+      token = TokenImpl.attach(tokenProxy) as unknown as EncryptedGovernanceToken;
 
       expect(await token.name()).to.equal("Encrypted Gov Token");
       expect(await token.symbol()).to.equal("eGOV");
@@ -102,9 +100,15 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       expect(await token.version()).to.equal(1);
     });
 
-    it("should deploy EncryptedTokenVoting plugin (non-proxy)", async function () {
-      const Voting = await ethers.getContractFactory("EncryptedTokenVoting");
-      voting = (await Voting.deploy(
+    it("should deploy EncryptedTokenVoting via ERC1967 proxy", async function () {
+      const VotingImpl = await ethers.getContractFactory("EncryptedTokenVoting");
+      const votingImpl = await VotingImpl.deploy();
+      await votingImpl.waitForDeployment();
+
+      const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", {
+        libraries: {},
+      });
+      const initData = VotingImpl.interface.encodeFunctionData("initialize", [
         daoProxy,
         tokenProxy,
         VOTING_DURATION,
@@ -112,24 +116,27 @@ describe("E2E: Encrypted DAO (local chain)", function () {
         SUPPORT_PCT,
         MIN_PROPOSER_BALANCE,
         ethers.ZeroAddress,
-      )) as unknown as EncryptedTokenVoting;
-      await voting.waitForDeployment();
+      ]);
+      const proxy = await ERC1967Proxy.deploy(await votingImpl.getAddress(), initData);
+      await proxy.waitForDeployment();
+
+      votingProxy = await proxy.getAddress();
+      voting = VotingImpl.attach(votingProxy) as unknown as EncryptedTokenVoting;
 
       expect(await voting.dao()).to.equal(daoProxy);
       expect(await voting.governanceToken()).to.equal(tokenProxy);
+      expect(await voting.version()).to.equal(1);
     });
 
     it("should wire up permissions (snapshot creator + execute)", async function () {
-      const votingAddress = await voting.getAddress();
-
       // Authorize voting plugin as snapshot creator
-      await token.setSnapshotCreator(votingAddress, true);
-      expect(await token.isSnapshotCreator(votingAddress)).to.be.true;
+      await token.setSnapshotCreator(votingProxy, true);
+      expect(await token.isSnapshotCreator(votingProxy)).to.be.true;
 
       // Grant EXECUTE_PERMISSION to voting plugin on the DAO
       const EXECUTE_PERMISSION_ID = await dao.EXECUTE_PERMISSION_ID();
-      await dao.grant(daoProxy, votingAddress, EXECUTE_PERMISSION_ID);
-      expect(await dao.hasPermission(daoProxy, votingAddress, EXECUTE_PERMISSION_ID)).to.be.true;
+      await dao.grant(daoProxy, votingProxy, EXECUTE_PERMISSION_ID);
+      expect(await dao.hasPermission(daoProxy, votingProxy, EXECUTE_PERMISSION_ID)).to.be.true;
     });
 
     it("should prevent re-initialization", async function () {
@@ -154,7 +161,6 @@ describe("E2E: Encrypted DAO (local chain)", function () {
     });
 
     it("should support delegation", async function () {
-      // Alice delegates to Bob — Bob will have Alice's + Bob's voting power
       await token.connect(alice).delegate(bob.address);
       expect(await token.delegates(alice.address)).to.equal(bob.address);
     });
@@ -172,8 +178,6 @@ describe("E2E: Encrypted DAO (local chain)", function () {
     let proposalId: bigint;
 
     it("should create a proposal with encrypted calldata", async function () {
-      const votingAddress = await voting.getAddress();
-
       // Encode a simple ETH transfer action as the proposal
       const actions = [
         {
@@ -198,7 +202,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       const chunkCount = Math.ceil(rawBytes.length / chunkSize);
 
       // Create encrypted input with all chunks
-      const input = fhevm.createEncryptedInput(votingAddress, alice.address);
+      const input = fhevm.createEncryptedInput(votingProxy, alice.address);
       for (let i = 0; i < chunkCount; i++) {
         const chunk = rawBytes.slice(i * chunkSize, (i + 1) * chunkSize);
         const value = BigInt(ethers.hexlify(chunk));
@@ -236,10 +240,8 @@ describe("E2E: Encrypted DAO (local chain)", function () {
     });
 
     it("should allow voting with encrypted ballots", async function () {
-      const votingAddress = await voting.getAddress();
-
       // Bob votes YES
-      const bobInput = fhevm.createEncryptedInput(votingAddress, bob.address);
+      const bobInput = fhevm.createEncryptedInput(votingProxy, bob.address);
       bobInput.addBool(true);
       const bobEncrypted = await bobInput.encrypt();
 
@@ -247,7 +249,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       expect(await voting.hasVoted(proposalId, bob.address)).to.be.true;
 
       // Carol votes NO
-      const carolInput = fhevm.createEncryptedInput(votingAddress, carol.address);
+      const carolInput = fhevm.createEncryptedInput(votingProxy, carol.address);
       carolInput.addBool(false);
       const carolEncrypted = await carolInput.encrypt();
 
@@ -258,8 +260,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
     });
 
     it("should prevent double voting", async function () {
-      const votingAddress = await voting.getAddress();
-      const input = fhevm.createEncryptedInput(votingAddress, bob.address);
+      const input = fhevm.createEncryptedInput(votingProxy, bob.address);
       input.addBool(true);
       const encrypted = await input.encrypt();
 
@@ -305,82 +306,66 @@ describe("E2E: Encrypted DAO (local chain)", function () {
 
   describe("4. DAO Upgrade via Governance", function () {
     it("should upgrade DAO from V1 to V2 via owner (UPGRADE_PERMISSION)", async function () {
-      // Deploy V2 implementation
-      const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
+      const DAOV2Impl = await ethers.getContractFactory("DAOV2");
       const daoV2Impl = await DAOV2Impl.deploy();
       await daoV2Impl.waitForDeployment();
       const v2ImplAddress = await daoV2Impl.getAddress();
 
-      // Owner has UPGRADE_PERMISSION — upgrade directly
       await dao.upgradeToAndCall(v2ImplAddress, "0x");
 
-      // Attach V2 interface to the proxy
-      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOUpgradeableV2;
+      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOV2;
 
-      // Verify upgrade
       expect(await daoV2.version()).to.equal(2);
 
-      // Verify existing state preserved — owner still has ROOT
       const ROOT_PERMISSION_ID = await daoV2.ROOT_PERMISSION_ID();
       expect(await daoV2.hasPermission(daoProxy, owner.address, ROOT_PERMISSION_ID)).to.be.true;
     });
 
     it("should use new V2 functionality (pause/unpause)", async function () {
-      const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
-      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOUpgradeableV2;
+      const DAOV2Impl = await ethers.getContractFactory("DAOV2");
+      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOV2;
 
-      // Grant PAUSE_PERMISSION to owner
       const PAUSE_PERMISSION_ID = await daoV2.PAUSE_PERMISSION_ID();
       await daoV2.grant(daoProxy, owner.address, PAUSE_PERMISSION_ID);
 
-      // Pause
       await daoV2.pause();
       expect(await daoV2.paused()).to.be.true;
 
-      // Unpause
       await daoV2.unpause();
       expect(await daoV2.paused()).to.be.false;
     });
 
     it("should reject upgrade from unauthorized account", async function () {
-      const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
+      const DAOV2Impl = await ethers.getContractFactory("DAOV2");
       const daoV2Impl = await DAOV2Impl.deploy();
       await daoV2Impl.waitForDeployment();
 
-      // Alice doesn't have UPGRADE_PERMISSION
       await expect(
         dao.connect(alice).upgradeToAndCall(await daoV2Impl.getAddress(), "0x"),
       ).to.be.revertedWith("DAO: unauthorized");
     });
 
     it("should allow upgrade via DAO governance (execute action)", async function () {
-      const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
-      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOUpgradeableV2;
+      const DAOV2Impl = await ethers.getContractFactory("DAOV2");
+      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOV2;
 
-      // Deploy another V2 impl (to test upgrade-via-execute)
       const anotherV2 = await DAOV2Impl.deploy();
       await anotherV2.waitForDeployment();
 
-      // Grant EXECUTE_PERMISSION to owner for testing
       const EXECUTE_PERMISSION_ID = await daoV2.EXECUTE_PERMISSION_ID();
       await daoV2.grant(daoProxy, owner.address, EXECUTE_PERMISSION_ID);
 
-      // When DAO.execute() calls upgradeToAndCall on itself, _msgSender() is
-      // the DAO address (self-call). So the DAO needs UPGRADE_PERMISSION for itself.
       const UPGRADE_PERMISSION_ID = await daoV2.UPGRADE_PERMISSION_ID();
       await daoV2.grant(daoProxy, daoProxy, UPGRADE_PERMISSION_ID);
 
-      // Construct upgrade action: DAO calls upgradeToAndCall on itself
       const upgradeCalldata = daoV2.interface.encodeFunctionData("upgradeToAndCall", [
         await anotherV2.getAddress(),
         "0x",
       ]);
       const actions = [{ to: daoProxy, value: 0, data: upgradeCalldata }];
 
-      // Execute through DAO
       await daoV2.execute(ethers.id("upgrade-action"), actions, 0);
 
-      // Still V2
       expect(await daoV2.version()).to.equal(2);
     });
   });
@@ -391,42 +376,46 @@ describe("E2E: Encrypted DAO (local chain)", function () {
 
   describe("5. Plugin Rotation", function () {
     it("should rotate voting plugin by revoking/granting EXECUTE_PERMISSION", async function () {
-      const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
-      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOUpgradeableV2;
+      const DAOV2Impl = await ethers.getContractFactory("DAOV2");
+      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOV2;
       const EXECUTE_PERMISSION_ID = await daoV2.EXECUTE_PERMISSION_ID();
-      const oldVotingAddress = await voting.getAddress();
 
-      // Deploy new voting plugin (V2 with different params)
-      const Voting = await ethers.getContractFactory("EncryptedTokenVoting");
-      const newVoting = (await Voting.deploy(
+      // Deploy new voting plugin via proxy
+      const VotingImpl = await ethers.getContractFactory("EncryptedTokenVoting");
+      const newVotingImpl = await VotingImpl.deploy();
+      await newVotingImpl.waitForDeployment();
+
+      const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", { libraries: {} });
+      const initData = VotingImpl.interface.encodeFunctionData("initialize", [
         daoProxy,
         tokenProxy,
-        VOTING_DURATION * 2, // Longer voting duration
-        30, // Higher quorum
-        60, // Higher support
+        VOTING_DURATION * 2,
+        30,
+        60,
         MIN_PROPOSER_BALANCE,
         ethers.ZeroAddress,
-      )) as unknown as EncryptedTokenVoting;
-      await newVoting.waitForDeployment();
-      const newVotingAddress = await newVoting.getAddress();
+      ]);
+      const newProxy = await ERC1967Proxy.deploy(await newVotingImpl.getAddress(), initData);
+      await newProxy.waitForDeployment();
+      const newVotingProxy = await newProxy.getAddress();
+      const newVoting = VotingImpl.attach(newVotingProxy) as unknown as EncryptedTokenVoting;
 
       // Revoke old plugin
-      await daoV2.revoke(daoProxy, oldVotingAddress, EXECUTE_PERMISSION_ID);
-      expect(await daoV2.hasPermission(daoProxy, oldVotingAddress, EXECUTE_PERMISSION_ID)).to.be
-        .false;
+      await daoV2.revoke(daoProxy, votingProxy, EXECUTE_PERMISSION_ID);
+      expect(await daoV2.hasPermission(daoProxy, votingProxy, EXECUTE_PERMISSION_ID)).to.be.false;
 
       // Grant to new plugin
-      await daoV2.grant(daoProxy, newVotingAddress, EXECUTE_PERMISSION_ID);
-      expect(await daoV2.hasPermission(daoProxy, newVotingAddress, EXECUTE_PERMISSION_ID)).to.be
+      await daoV2.grant(daoProxy, newVotingProxy, EXECUTE_PERMISSION_ID);
+      expect(await daoV2.hasPermission(daoProxy, newVotingProxy, EXECUTE_PERMISSION_ID)).to.be
         .true;
 
       // Authorize new voting as snapshot creator
-      await token.setSnapshotCreator(newVotingAddress, true);
-      expect(await token.isSnapshotCreator(newVotingAddress)).to.be.true;
+      await token.setSnapshotCreator(newVotingProxy, true);
+      expect(await token.isSnapshotCreator(newVotingProxy)).to.be.true;
 
       // Revoke old snapshot creator
-      await token.setSnapshotCreator(oldVotingAddress, false);
-      expect(await token.isSnapshotCreator(oldVotingAddress)).to.be.false;
+      await token.setSnapshotCreator(votingProxy, false);
+      expect(await token.isSnapshotCreator(votingProxy)).to.be.false;
 
       // Verify new plugin has correct params
       expect(await newVoting.votingDuration()).to.equal(VOTING_DURATION * 2);
@@ -440,8 +429,8 @@ describe("E2E: Encrypted DAO (local chain)", function () {
 
   describe("6. Treasury Operations", function () {
     it("should accept ETH deposits", async function () {
-      const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
-      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOUpgradeableV2;
+      const DAOV2Impl = await ethers.getContractFactory("DAOV2");
+      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOV2;
 
       await expect(owner.sendTransaction({ to: daoProxy, value: ethers.parseEther("1.0") }))
         .to.emit(daoV2, "ETHDeposited")
@@ -452,8 +441,8 @@ describe("E2E: Encrypted DAO (local chain)", function () {
     });
 
     it("should execute ETH transfer via EXECUTE_PERMISSION", async function () {
-      const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
-      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOUpgradeableV2;
+      const DAOV2Impl = await ethers.getContractFactory("DAOV2");
+      const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOV2;
 
       const carolBalanceBefore = await ethers.provider.getBalance(carol.address);
 
@@ -471,19 +460,15 @@ describe("E2E: Encrypted DAO (local chain)", function () {
 
   describe("7. Governance Token Upgrade", function () {
     it("should preserve token state across proxy upgrade", async function () {
-      // Capture state before upgrade
       const supplyBefore = await token.totalSupply();
       const aliceIsHolder = await token.isTokenHolder(alice.address);
 
-      // Deploy new token implementation (same contract, simulating a bugfix)
-      const TokenV1 = await ethers.getContractFactory("EncryptedGovernanceTokenUpgradeable");
+      const TokenV1 = await ethers.getContractFactory("EncryptedGovernanceToken");
       const newImpl = await TokenV1.deploy();
       await newImpl.waitForDeployment();
 
-      // Upgrade
       await token.upgradeToAndCall(await newImpl.getAddress(), "0x");
 
-      // Verify state preserved
       expect(await token.totalSupply()).to.equal(supplyBefore);
       expect(await token.isTokenHolder(alice.address)).to.equal(aliceIsHolder);
       expect(await token.name()).to.equal("Encrypted Gov Token");

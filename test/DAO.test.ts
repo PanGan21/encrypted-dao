@@ -3,6 +3,17 @@ import { ethers } from "hardhat";
 import type { DAO } from "../types";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
+async function deployProxy(contractName: string, initArgs: unknown[]): Promise<string> {
+  const Impl = await ethers.getContractFactory(contractName);
+  const impl = await Impl.deploy();
+  await impl.waitForDeployment();
+  const initData = Impl.interface.encodeFunctionData("initialize", initArgs);
+  const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", { libraries: {} });
+  const proxy = await ERC1967Proxy.deploy(await impl.getAddress(), initData);
+  await proxy.waitForDeployment();
+  return await proxy.getAddress();
+}
+
 describe("DAO", function () {
   let dao: DAO;
   let owner: HardhatEthersSigner;
@@ -14,9 +25,9 @@ describe("DAO", function () {
 
   beforeEach(async function () {
     [owner, alice, bob] = await ethers.getSigners();
+    const proxyAddr = await deployProxy("DAO", [owner.address, ethers.ZeroAddress]);
     const DAO = await ethers.getContractFactory("DAO");
-    dao = (await DAO.deploy(owner.address, ethers.ZeroAddress)) as unknown as DAO;
-    await dao.waitForDeployment();
+    dao = DAO.attach(proxyAddr) as unknown as DAO;
   });
 
   describe("Deployment", function () {
@@ -27,10 +38,9 @@ describe("DAO", function () {
     });
 
     it("should revert with zero address owner", async function () {
-      const DAO = await ethers.getContractFactory("DAO");
-      await expect(DAO.deploy(ethers.ZeroAddress, ethers.ZeroAddress)).to.be.revertedWith(
-        "DAO: zero address owner",
-      );
+      await expect(
+        deployProxy("DAO", [ethers.ZeroAddress, ethers.ZeroAddress]),
+      ).to.be.revertedWith("DAO: zero address owner");
     });
 
     it("should expose correct permission IDs", async function () {

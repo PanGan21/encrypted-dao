@@ -17,6 +17,8 @@
     "typechain": "cross-env TS_NODE_TRANSPILE_ONLY=true hardhat typechain",
     "deploy:localhost": "hardhat deploy --network localhost",
     "deploy:sepolia": "hardhat deploy --network sepolia",
+    "upgrade:localhost": "hardhat run scripts/upgrade.ts --network localhost",
+    "upgrade:sepolia": "hardhat run scripts/upgrade.ts --network sepolia",
     "view-proposal": "hardhat run scripts/viewAndDecryptProposal.ts --network sepolia",
     "chain": "hardhat node --network hardhat --no-deploy",
     "test:e2e": "hardhat test test/e2e.test.ts",

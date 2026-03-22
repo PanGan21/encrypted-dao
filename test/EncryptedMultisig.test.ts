@@ -3,6 +3,17 @@ import { ethers, fhevm } from "hardhat";
 import type { DAO, EncryptedMultisig } from "../types";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
+async function deployProxy(contractName: string, initArgs: unknown[]): Promise<string> {
+  const Impl = await ethers.getContractFactory(contractName);
+  const impl = await Impl.deploy();
+  await impl.waitForDeployment();
+  const initData = Impl.interface.encodeFunctionData("initialize", initArgs);
+  const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", { libraries: {} });
+  const proxy = await ERC1967Proxy.deploy(await impl.getAddress(), initData);
+  await proxy.waitForDeployment();
+  return await proxy.getAddress();
+}
+
 describe("EncryptedMultisig", function () {
   let dao: DAO;
   let multisig: EncryptedMultisig;
@@ -15,90 +26,95 @@ describe("EncryptedMultisig", function () {
   const THRESHOLD = 2;
   const PROPOSAL_DURATION = 30 * 24 * 60 * 60;
 
-  describe("Constructor validation (no FHE needed)", function () {
+  describe("Initializer validation (no FHE needed)", function () {
     beforeEach(async function () {
       [owner, alice, bob, carol, nonSigner] = await ethers.getSigners();
-      const DAO = await ethers.getContractFactory("DAO");
-      dao = (await DAO.deploy(owner.address, ethers.ZeroAddress)) as unknown as DAO;
-      await dao.waitForDeployment();
+      const daoProxy = await deployProxy("DAO", [owner.address, ethers.ZeroAddress]);
+      const DAOFactory = await ethers.getContractFactory("DAO");
+      dao = DAOFactory.attach(daoProxy) as unknown as DAO;
     });
 
     it("should revert with zero address DAO", async function () {
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(
+        deployProxy("EncryptedMultisig", [
           ethers.ZeroAddress,
           [alice.address],
           1,
           PROPOSAL_DURATION,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid DAO");
     });
 
     it("should revert with empty signers array", async function () {
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(await dao.getAddress(), [], 1, PROPOSAL_DURATION, ethers.ZeroAddress),
+        deployProxy("EncryptedMultisig", [
+          await dao.getAddress(),
+          [],
+          1,
+          PROPOSAL_DURATION,
+          ethers.ZeroAddress,
+        ]),
       ).to.be.revertedWith("Need at least one signer");
     });
 
     it("should revert with zero threshold", async function () {
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(
+        deployProxy("EncryptedMultisig", [
           await dao.getAddress(),
           [alice.address],
           0,
           PROPOSAL_DURATION,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid threshold");
     });
 
     it("should revert with threshold exceeding signer count", async function () {
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(
+        deployProxy("EncryptedMultisig", [
           await dao.getAddress(),
           [alice.address],
           2,
           PROPOSAL_DURATION,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Invalid threshold");
     });
 
     it("should revert with zero duration", async function () {
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(await dao.getAddress(), [alice.address], 1, 0, ethers.ZeroAddress),
+        deployProxy("EncryptedMultisig", [
+          await dao.getAddress(),
+          [alice.address],
+          1,
+          0,
+          ethers.ZeroAddress,
+        ]),
       ).to.be.revertedWith("Invalid duration");
     });
 
     it("should revert with zero address signer", async function () {
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(
+        deployProxy("EncryptedMultisig", [
           await dao.getAddress(),
           [ethers.ZeroAddress],
           1,
           PROPOSAL_DURATION,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Zero address");
     });
 
     it("should revert with duplicate signers", async function () {
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(
+        deployProxy("EncryptedMultisig", [
           await dao.getAddress(),
           [alice.address, alice.address],
           1,
           PROPOSAL_DURATION,
           ethers.ZeroAddress,
-        ),
+        ]),
       ).to.be.revertedWith("Duplicate signer");
     });
   });
@@ -109,19 +125,19 @@ describe("EncryptedMultisig", function () {
 
       [owner, alice, bob, carol, nonSigner] = await ethers.getSigners();
 
-      const DAO = await ethers.getContractFactory("DAO");
-      dao = (await DAO.deploy(owner.address, ethers.ZeroAddress)) as unknown as DAO;
-      await dao.waitForDeployment();
+      const daoProxy = await deployProxy("DAO", [owner.address, ethers.ZeroAddress]);
+      const DAOFactory = await ethers.getContractFactory("DAO");
+      dao = DAOFactory.attach(daoProxy) as unknown as DAO;
 
-      const Multisig = await ethers.getContractFactory("EncryptedMultisig");
-      multisig = (await Multisig.deploy(
-        await dao.getAddress(),
+      const multisigProxy = await deployProxy("EncryptedMultisig", [
+        daoProxy,
         [alice.address, bob.address, carol.address],
         THRESHOLD,
         PROPOSAL_DURATION,
         ethers.ZeroAddress,
-      )) as unknown as EncryptedMultisig;
-      await multisig.waitForDeployment();
+      ]);
+      const MultisigFactory = await ethers.getContractFactory("EncryptedMultisig");
+      multisig = MultisigFactory.attach(multisigProxy) as unknown as EncryptedMultisig;
     });
 
     it("should set DAO reference", async function () {
