@@ -65,12 +65,7 @@ contract EncryptedGovernanceTokenUpgradeable is Initializable, UUPSUpgradeable, 
     /// @notice Initialize the token (replaces constructor for proxy deployments)
     /// @param name_ Token name
     /// @param symbol_ Token symbol
-    /// @param trustedForwarder_ EIP-2771 trusted forwarder (address(0) to disable)
-    function initialize(
-        string memory name_,
-        string memory symbol_,
-        address trustedForwarder_
-    ) external initializer {
+    function initialize(string memory name_, string memory symbol_, address) external initializer {
         FHE.setCoprocessor(ZamaConfig.getEthereumCoprocessorConfig());
         name = name_;
         symbol = symbol_;
@@ -152,11 +147,7 @@ contract EncryptedGovernanceTokenUpgradeable is Initializable, UUPSUpgradeable, 
         return _balances[account];
     }
 
-    function transfer(
-        address to,
-        externalEuint64 encryptedAmount,
-        bytes calldata inputProof
-    ) external returns (bool) {
+    function transfer(address to, externalEuint64 encryptedAmount, bytes calldata inputProof) external returns (bool) {
         euint64 amount = FHE.fromExternal(encryptedAmount, inputProof);
         ebool canTransfer = FHE.le(amount, _balances[_msgSender()]);
         _transfer(_msgSender(), to, amount, canTransfer);
@@ -259,19 +250,11 @@ contract EncryptedGovernanceTokenUpgradeable is Initializable, UUPSUpgradeable, 
 
         VotingPowerCheckpoint[] storage ckpts = _vpCheckpoints[account];
         if (ckpts.length == 0 || ckpts[ckpts.length - 1].snapshotId < currentSnapshotId) {
-            ckpts.push(VotingPowerCheckpoint({
-                snapshotId: currentSnapshotId,
-                power: _votingPower[account]
-            }));
+            ckpts.push(VotingPowerCheckpoint({snapshotId: currentSnapshotId, power: _votingPower[account]}));
         }
     }
 
-    function _transfer(
-        address from,
-        address to,
-        euint64 amount,
-        ebool isTransferable
-    ) internal {
+    function _transfer(address from, address to, euint64 amount, ebool isTransferable) internal {
         euint64 transferValue = FHE.select(isTransferable, amount, FHE.asEuint64(0));
 
         _isTokenHolder[to] = true;
@@ -310,20 +293,12 @@ contract EncryptedGovernanceTokenUpgradeable is Initializable, UUPSUpgradeable, 
         FHE.allow(amount, spender);
     }
 
-    function _updateAllowance(
-        address tokenOwner,
-        address spender,
-        euint64 amount
-    ) internal returns (ebool) {
+    function _updateAllowance(address tokenOwner, address spender, euint64 amount) internal returns (ebool) {
         euint64 currentAllowance = _allowances[tokenOwner][spender];
         ebool allowedTransfer = FHE.le(amount, currentAllowance);
         ebool canTransfer = FHE.le(amount, _balances[tokenOwner]);
         ebool isTransferable = FHE.and(canTransfer, allowedTransfer);
-        _approve(
-            tokenOwner,
-            spender,
-            FHE.select(isTransferable, FHE.sub(currentAllowance, amount), currentAllowance)
-        );
+        _approve(tokenOwner, spender, FHE.select(isTransferable, FHE.sub(currentAllowance, amount), currentAllowance));
         return isTransferable;
     }
 }

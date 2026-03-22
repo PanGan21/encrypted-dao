@@ -133,9 +133,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
     });
 
     it("should prevent re-initialization", async function () {
-      await expect(
-        dao.initialize(alice.address, ethers.ZeroAddress),
-      ).to.be.reverted;
+      await expect(dao.initialize(alice.address, ethers.ZeroAddress)).to.be.reverted;
     });
   });
 
@@ -215,12 +213,12 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       // Convert handles to bytes32 array
       const encHandles = encrypted.handles.map((h: Uint8Array) => ethers.hexlify(h));
 
-      const tx = await voting.connect(alice).createProposal(
-        encHandles,
-        encrypted.inputProof,
-        cancelKeyHash,
-        { startDate: 0, endDate: 0 },
-      );
+      const tx = await voting
+        .connect(alice)
+        .createProposal(encHandles, encrypted.inputProof, cancelKeyHash, {
+          startDate: 0,
+          endDate: 0,
+        });
       await tx.wait();
 
       proposalId = BigInt(await voting.proposalCount());
@@ -245,9 +243,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       bobInput.addBool(true);
       const bobEncrypted = await bobInput.encrypt();
 
-      await voting
-        .connect(bob)
-        .vote(proposalId, bobEncrypted.handles[0], bobEncrypted.inputProof);
+      await voting.connect(bob).vote(proposalId, bobEncrypted.handles[0], bobEncrypted.inputProof);
       expect(await voting.hasVoted(proposalId, bob.address)).to.be.true;
 
       // Carol votes NO
@@ -447,9 +443,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
       const DAOV2Impl = await ethers.getContractFactory("DAOUpgradeableV2");
       const daoV2 = DAOV2Impl.attach(daoProxy) as unknown as DAOUpgradeableV2;
 
-      await expect(
-        owner.sendTransaction({ to: daoProxy, value: ethers.parseEther("1.0") }),
-      )
+      await expect(owner.sendTransaction({ to: daoProxy, value: ethers.parseEther("1.0") }))
         .to.emit(daoV2, "ETHDeposited")
         .withArgs(owner.address, ethers.parseEther("1.0"));
 
@@ -463,9 +457,7 @@ describe("E2E: Encrypted DAO (local chain)", function () {
 
       const carolBalanceBefore = await ethers.provider.getBalance(carol.address);
 
-      const actions = [
-        { to: carol.address, value: ethers.parseEther("0.5"), data: "0x" },
-      ];
+      const actions = [{ to: carol.address, value: ethers.parseEther("0.5"), data: "0x" }];
       await daoV2.execute(ethers.id("treasury-transfer"), actions, 0);
 
       const carolBalanceAfter = await ethers.provider.getBalance(carol.address);

@@ -9,8 +9,6 @@ describe("EncryptedTokenVoting", function () {
   let voting: EncryptedTokenVoting;
   let owner: HardhatEthersSigner;
   let alice: HardhatEthersSigner;
-  let bob: HardhatEthersSigner;
-  let carol: HardhatEthersSigner;
 
   const VOTING_DURATION = 7 * 24 * 60 * 60;
   const QUORUM_PCT = 20;
@@ -18,7 +16,7 @@ describe("EncryptedTokenVoting", function () {
   const MIN_PROPOSER_BALANCE = 100;
 
   beforeEach(async function () {
-    [owner, alice, bob, carol] = await ethers.getSigners();
+    [owner, alice] = await ethers.getSigners();
 
     const DAO = await ethers.getContractFactory("DAO");
     dao = (await DAO.deploy(owner.address, ethers.ZeroAddress)) as unknown as DAO;
@@ -167,9 +165,7 @@ describe("EncryptedTokenVoting", function () {
 
   describe("Cancellation", function () {
     it("should revert cancel on non-existent proposal", async function () {
-      await expect(voting.cancel(1, ethers.randomBytes(32))).to.be.revertedWith(
-        "Invalid proposal",
-      );
+      await expect(voting.cancel(1, ethers.randomBytes(32))).to.be.revertedWith("Invalid proposal");
     });
   });
 

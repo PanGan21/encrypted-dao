@@ -328,7 +328,9 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
         return ProposalState.Pending;
     }
 
-    function getProposalInfo(uint256 proposalId)
+    function getProposalInfo(
+        uint256 proposalId
+    )
         external
         view
         returns (
@@ -356,11 +358,7 @@ contract EncryptedMultisig is ERC2771Context, ZamaEthereumConfig {
         );
     }
 
-    function getRevealedChunks(uint256 proposalId)
-        external
-        view
-        returns (uint256[] memory)
-    {
+    function getRevealedChunks(uint256 proposalId) external view returns (uint256[] memory) {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         require(_proposals[proposalId].revealed, "Not revealed");
         return _revealedChunks[proposalId];

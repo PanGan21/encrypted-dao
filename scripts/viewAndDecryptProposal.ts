@@ -20,28 +20,28 @@
  *   npm run view-proposal
  */
 
-import { ethers } from 'hardhat';
+import { ethers } from "hardhat";
 
 // ─── Configuration ─────────────────────────────────────────────────
 
-const PROPOSAL_ID = Number(process.env.PROPOSAL_ID ?? '1');
-const PLUGIN_TYPE = (process.env.PLUGIN_TYPE ?? 'voting') as 'voting' | 'multisig';
+const PROPOSAL_ID = Number(process.env.PROPOSAL_ID ?? "1");
+const PLUGIN_TYPE = (process.env.PLUGIN_TYPE ?? "voting") as "voting" | "multisig";
 const PLUGIN_ADDRESS = process.env.PLUGIN_CONTRACT_ADDRESS!;
 
 // ─── ABIs ──────────────────────────────────────────────────────────
 
 const VOTING_ABI = [
-  'function viewProposal(uint256 proposalId) external',
-  'function getProposalInfo(uint256 proposalId) external view returns (uint256 snapshotId, uint64 voteStart, uint64 voteEnd, uint256 chunkCount, bool finalized, bool resultApproved, bool revealed, bool executed, bool cancelled)',
-  'function state(uint256 proposalId) external view returns (uint8)',
-  'function getRevealedChunks(uint256 proposalId) external view returns (uint256[])',
+  "function viewProposal(uint256 proposalId) external",
+  "function getProposalInfo(uint256 proposalId) external view returns (uint256 snapshotId, uint64 voteStart, uint64 voteEnd, uint256 chunkCount, bool finalized, bool resultApproved, bool revealed, bool executed, bool cancelled)",
+  "function state(uint256 proposalId) external view returns (uint8)",
+  "function getRevealedChunks(uint256 proposalId) external view returns (uint256[])",
 ];
 
 const MULTISIG_ABI = [
-  'function viewProposal(uint256 proposalId) external',
-  'function getProposalInfo(uint256 proposalId) external view returns (uint64 createdAt, uint64 expiresAt, uint256 chunkCount, bool finalized, bool resultApproved, bool revealed, bool executed, bool cancelled)',
-  'function state(uint256 proposalId) external view returns (uint8)',
-  'function getRevealedChunks(uint256 proposalId) external view returns (uint256[])',
+  "function viewProposal(uint256 proposalId) external",
+  "function getProposalInfo(uint256 proposalId) external view returns (uint64 createdAt, uint64 expiresAt, uint256 chunkCount, bool finalized, bool resultApproved, bool revealed, bool executed, bool cancelled)",
+  "function state(uint256 proposalId) external view returns (uint8)",
+  "function getRevealedChunks(uint256 proposalId) external view returns (uint256[])",
 ];
 
 // ─── Helpers ───────────────────────────────────────────────────────
@@ -60,12 +60,12 @@ async function readEncryptedChunkHandles(
 
   // Storage slot of _encryptedChunks mapping.
   // Adjust if storage layout changes.
-  const mappingSlot = PLUGIN_TYPE === 'voting' ? 9 : 9;
+  const mappingSlot = PLUGIN_TYPE === "voting" ? 9 : 9;
 
   // For mapping(uint256 => euint256[]):
   // The array's storage slot = keccak256(abi.encode(proposalId, mappingSlot))
   const arraySlot = ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(['uint256', 'uint256'], [proposalId, mappingSlot]),
+    ethers.AbiCoder.defaultAbiCoder().encode(["uint256", "uint256"], [proposalId, mappingSlot]),
   );
 
   // Array elements start at keccak256(arraySlot)
@@ -85,16 +85,16 @@ async function readEncryptedChunkHandles(
  */
 function decodeActionsFromChunks(chunks: bigint[]): { to: string; value: bigint; data: string }[] {
   // Reconstruct the bytes from chunks
-  let hex = '0x';
+  let hex = "0x";
   for (const chunk of chunks) {
-    hex += chunk.toString(16).padStart(64, '0');
+    hex += chunk.toString(16).padStart(64, "0");
   }
 
   // Decode as Action[] = (address, uint256, bytes)[]
   const coder = ethers.AbiCoder.defaultAbiCoder();
-  const decoded = coder.decode(['(address,uint256,bytes)[]'], hex);
+  const decoded = coder.decode(["(address,uint256,bytes)[]"], hex);
 
-  return decoded[0].map((action: any) => ({
+  return decoded[0].map((action: [string, bigint, string]) => ({
     to: action[0],
     value: action[1],
     data: action[2],
@@ -105,7 +105,7 @@ function decodeActionsFromChunks(chunks: bigint[]): { to: string; value: bigint;
 
 async function main() {
   if (!PLUGIN_ADDRESS) {
-    console.error('Set PLUGIN_CONTRACT_ADDRESS environment variable');
+    console.error("Set PLUGIN_CONTRACT_ADDRESS environment variable");
     process.exit(1);
   }
 
@@ -115,34 +115,42 @@ async function main() {
   console.log(`Plugin type:    ${PLUGIN_TYPE}`);
   console.log(`Plugin address: ${PLUGIN_ADDRESS}`);
   console.log(`Proposal ID:    ${PROPOSAL_ID}`);
-  console.log('');
+  console.log("");
 
-  const abi = PLUGIN_TYPE === 'voting' ? VOTING_ABI : MULTISIG_ABI;
+  const abi = PLUGIN_TYPE === "voting" ? VOTING_ABI : MULTISIG_ABI;
   const plugin = new ethers.Contract(PLUGIN_ADDRESS, abi, signer);
 
   // ── Step 1: Get proposal info (chunk count) ──
 
-  console.log('1. Reading proposal info...');
+  console.log("1. Reading proposal info...");
   const info = await plugin.getProposalInfo(PROPOSAL_ID);
   const chunkCount = Number(info.chunkCount);
   console.log(`   Chunk count: ${chunkCount}`);
 
   const stateVal = await plugin.state(PROPOSAL_ID);
-  const stateNames = ['Active', 'Pending', 'Succeeded', 'Defeated', 'Revealed', 'Executed', 'Cancelled'];
-  console.log(`   State:       ${stateNames[Number(stateVal)] ?? 'Unknown'}`);
+  const stateNames = [
+    "Active",
+    "Pending",
+    "Succeeded",
+    "Defeated",
+    "Revealed",
+    "Executed",
+    "Cancelled",
+  ];
+  console.log(`   State:       ${stateNames[Number(stateVal)] ?? "Unknown"}`);
 
   // ── Step 2: Call viewProposal() to get FHE.allow ──
 
-  console.log('');
-  console.log('2. Calling viewProposal() to request decryption access...');
+  console.log("");
+  console.log("2. Calling viewProposal() to request decryption access...");
   const tx = await plugin.viewProposal(PROPOSAL_ID);
   await tx.wait();
   console.log(`   tx: ${tx.hash}`);
 
   // ── Step 3: Read encrypted chunk handles ──
 
-  console.log('');
-  console.log('3. Reading encrypted chunk handles from storage...');
+  console.log("");
+  console.log("3. Reading encrypted chunk handles from storage...");
   const handles = await readEncryptedChunkHandles(PLUGIN_ADDRESS, PROPOSAL_ID, chunkCount);
   for (let i = 0; i < handles.length; i++) {
     console.log(`   chunk[${i}]: ${handles[i]}`);
@@ -158,34 +166,36 @@ async function main() {
   //   const signature = await signer.signTypedData(eip712.domain, ...);
   //   const result = await instance.userDecrypt(handlePairs, privateKey, publicKey, signature, ...);
 
-  console.log('');
-  console.log('4. Decryption requires @zama-fhe/relayer-sdk connected to a KMS.');
-  console.log('   For revealed proposals, reading on-chain chunks directly:');
+  console.log("");
+  console.log("4. Decryption requires @zama-fhe/relayer-sdk connected to a KMS.");
+  console.log("   For revealed proposals, reading on-chain chunks directly:");
 
   try {
     const revealedChunks = await plugin.getRevealedChunks(PROPOSAL_ID);
-    const decryptedChunks: bigint[] = revealedChunks.map((c: any) => BigInt(c));
+    const decryptedChunks: bigint[] = revealedChunks.map((c: bigint) => BigInt(c));
 
-    console.log('');
-    console.log('5. Decoding ABI-encoded Action[] from chunks...');
+    console.log("");
+    console.log("5. Decoding ABI-encoded Action[] from chunks...");
     const actions = decodeActionsFromChunks(decryptedChunks);
-    console.log('');
-    console.log('═══ Decoded Proposal Actions ═══');
+    console.log("");
+    console.log("═══ Decoded Proposal Actions ═══");
     for (let i = 0; i < actions.length; i++) {
       console.log(`  Action ${i}:`);
       console.log(`    to:    ${actions[i].to}`);
       console.log(`    value: ${actions[i].value} wei`);
       console.log(`    data:  ${actions[i].data}`);
     }
-    console.log('════════════════════════════════');
+    console.log("════════════════════════════════");
   } catch {
-    console.log('   Proposal has not been revealed yet. Use KMS user decryption to decrypt chunks.');
-    console.log('   Encrypted chunk handles are available above for client-side decryption.');
+    console.log(
+      "   Proposal has not been revealed yet. Use KMS user decryption to decrypt chunks.",
+    );
+    console.log("   Encrypted chunk handles are available above for client-side decryption.");
   }
 
-  console.log('');
-  console.log('You can now cast your vote with full knowledge of the proposal content.');
-  console.log('No off-chain data sharing was needed — everything is on-chain (encrypted).');
+  console.log("");
+  console.log("You can now cast your vote with full knowledge of the proposal content.");
+  console.log("No off-chain data sharing was needed — everything is on-chain (encrypted).");
 }
 
 main().catch((error) => {

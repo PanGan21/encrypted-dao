@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 pragma solidity ^0.8.24;
 
-import {FHE} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {IDAO} from "./IDAO.sol";
 import {ERC2771Context} from "./ERC2771Context.sol";
@@ -19,10 +18,7 @@ contract DAO is IDAO, ERC2771Context, ZamaEthereumConfig {
     mapping(bytes32 => bool) private _permissions;
 
     modifier auth(bytes32 permissionId) {
-        require(
-            _permissions[_permissionHash(address(this), _msgSender(), permissionId)],
-            "DAO: unauthorized"
-        );
+        require(_permissions[_permissionHash(address(this), _msgSender(), permissionId)], "DAO: unauthorized");
         _;
     }
 
@@ -45,9 +41,7 @@ contract DAO is IDAO, ERC2771Context, ZamaEthereumConfig {
         results = new bytes[](actions.length);
 
         for (uint256 i; i < actions.length; ) {
-            (bool success, bytes memory result) = actions[i].to.call{value: actions[i].value}(
-                actions[i].data
-            );
+            (bool success, bytes memory result) = actions[i].to.call{value: actions[i].value}(actions[i].data);
 
             if (!success) {
                 if (allowFailureMap & (1 << i) != 0) {
@@ -63,7 +57,9 @@ contract DAO is IDAO, ERC2771Context, ZamaEthereumConfig {
             }
 
             results[i] = result;
-            unchecked { i++; }
+            unchecked {
+                i++;
+            }
         }
 
         emit Executed(callId, _msgSender(), actions, allowFailureMap, failureMap);
@@ -102,6 +98,10 @@ contract DAO is IDAO, ERC2771Context, ZamaEthereumConfig {
         return keccak256(abi.encodePacked(where, who, permissionId));
     }
 
-    receive() external payable { emit ETHDeposited(msg.sender, msg.value); }
-    fallback() external payable { emit ETHDeposited(msg.sender, msg.value); }
+    receive() external payable {
+        emit ETHDeposited(msg.sender, msg.value);
+    }
+    fallback() external payable {
+        emit ETHDeposited(msg.sender, msg.value);
+    }
 }

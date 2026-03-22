@@ -73,31 +73,31 @@ npm run deploy:sepolia
 
 ## Contracts
 
-| Contract | Description |
-|---|---|
-| `DAO.sol` | Core treasury and executor. Private permission mappings, batched action execution. |
-| `EncryptedGovernanceToken.sol` | ERC20-like token with encrypted balances, checkpoint-based voting power snapshots, delegation. |
-| `EncryptedTokenVoting.sol` | Token-weighted voting plugin with encrypted votes, snapshotted power, on-chain encrypted calldata. |
-| `EncryptedMultisig.sol` | N-of-M multisig plugin with hidden signer identities and encrypted approval tallies. |
-| `DAOUpgradeable.sol` | UUPS-upgradeable DAO with `UPGRADE_PERMISSION_ID` for governance-controlled upgrades. |
-| `DAOUpgradeableV2.sol` | Example V2 upgrade adding pause/unpause functionality. |
-| `EncryptedGovernanceTokenUpgradeable.sol` | UUPS-upgradeable governance token with FHE coprocessor proxy-safe init. |
-| `ERC2771Context.sol` | Minimal EIP-2771 meta-transaction base contract. |
-| `IDAO.sol` | Interface defining the `Action` struct and `execute()` function. |
+| Contract                                  | Description                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `DAO.sol`                                 | Core treasury and executor. Private permission mappings, batched action execution.                 |
+| `EncryptedGovernanceToken.sol`            | ERC20-like token with encrypted balances, checkpoint-based voting power snapshots, delegation.     |
+| `EncryptedTokenVoting.sol`                | Token-weighted voting plugin with encrypted votes, snapshotted power, on-chain encrypted calldata. |
+| `EncryptedMultisig.sol`                   | N-of-M multisig plugin with hidden signer identities and encrypted approval tallies.               |
+| `DAOUpgradeable.sol`                      | UUPS-upgradeable DAO with `UPGRADE_PERMISSION_ID` for governance-controlled upgrades.              |
+| `DAOUpgradeableV2.sol`                    | Example V2 upgrade adding pause/unpause functionality.                                             |
+| `EncryptedGovernanceTokenUpgradeable.sol` | UUPS-upgradeable governance token with FHE coprocessor proxy-safe init.                            |
+| `ERC2771Context.sol`                      | Minimal EIP-2771 meta-transaction base contract.                                                   |
+| `IDAO.sol`                                | Interface defining the `Action` struct and `execute()` function.                                   |
 
 ## Privacy Summary
 
-| Component | What's Hidden | How |
-|---|---|---|
-| **Balances** | All token holdings | `euint64` encrypted storage |
-| **Voting power** | Individual weight (current + historical) | Encrypted checkpoints |
-| **Votes** | Direction and weight | `ebool` × snapshotted `euint64` |
-| **Tallies** | Running and final vote counts | `euint64`, only pass/fail revealed |
-| **Proposals** | Full calldata (targets, values, data) | `euint256[]` on-chain chunks |
-| **Proposer identity** | Who created the proposal | No membership check; cancel key hash |
-| **Membership** | Multisig signer identities | `ebool` flags, silent zero-out |
-| **Permissions** | DAO role assignments | Private mappings, minimal events |
-| **Caller identity** | Who is interacting with contracts | EIP-2771 trusted forwarder |
+| Component             | What's Hidden                            | How                                  |
+| --------------------- | ---------------------------------------- | ------------------------------------ |
+| **Balances**          | All token holdings                       | `euint64` encrypted storage          |
+| **Voting power**      | Individual weight (current + historical) | Encrypted checkpoints                |
+| **Votes**             | Direction and weight                     | `ebool` × snapshotted `euint64`      |
+| **Tallies**           | Running and final vote counts            | `euint64`, only pass/fail revealed   |
+| **Proposals**         | Full calldata (targets, values, data)    | `euint256[]` on-chain chunks         |
+| **Proposer identity** | Who created the proposal                 | No membership check; cancel key hash |
+| **Membership**        | Multisig signer identities               | `ebool` flags, silent zero-out       |
+| **Permissions**       | DAO role assignments                     | Private mappings, minimal events     |
+| **Caller identity**   | Who is interacting with contracts        | EIP-2771 trusted forwarder           |
 
 ## Documentation
 

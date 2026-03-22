@@ -21,10 +21,7 @@ contract DAOUpgradeable is Initializable, UUPSUpgradeable, IDAO, ERC2771Context 
     mapping(bytes32 => bool) private _permissions;
 
     modifier auth(bytes32 permissionId) {
-        require(
-            _permissions[_permissionHash(address(this), _msgSender(), permissionId)],
-            "DAO: unauthorized"
-        );
+        require(_permissions[_permissionHash(address(this), _msgSender(), permissionId)], "DAO: unauthorized");
         _;
     }
 
@@ -35,8 +32,7 @@ contract DAOUpgradeable is Initializable, UUPSUpgradeable, IDAO, ERC2771Context 
 
     /// @notice Initialize the DAO (replaces constructor for proxy deployments)
     /// @param initialOwner Address that receives ROOT_PERMISSION and UPGRADE_PERMISSION
-    /// @param trustedForwarder_ EIP-2771 trusted forwarder (address(0) to disable)
-    function initialize(address initialOwner, address trustedForwarder_) external initializer {
+    function initialize(address initialOwner, address) external initializer {
         require(initialOwner != address(0), "DAO: zero address owner");
         _grant(address(this), initialOwner, ROOT_PERMISSION_ID);
         _grant(address(this), initialOwner, UPGRADE_PERMISSION_ID);
@@ -57,9 +53,7 @@ contract DAOUpgradeable is Initializable, UUPSUpgradeable, IDAO, ERC2771Context 
         results = new bytes[](actions.length);
 
         for (uint256 i; i < actions.length; ) {
-            (bool success, bytes memory result) = actions[i].to.call{value: actions[i].value}(
-                actions[i].data
-            );
+            (bool success, bytes memory result) = actions[i].to.call{value: actions[i].value}(actions[i].data);
 
             if (!success) {
                 if (allowFailureMap & (1 << i) != 0) {
@@ -75,7 +69,9 @@ contract DAOUpgradeable is Initializable, UUPSUpgradeable, IDAO, ERC2771Context 
             }
 
             results[i] = result;
-            unchecked { i++; }
+            unchecked {
+                i++;
+            }
         }
 
         emit Executed(callId, _msgSender(), actions, allowFailureMap, failureMap);
@@ -119,6 +115,10 @@ contract DAOUpgradeable is Initializable, UUPSUpgradeable, IDAO, ERC2771Context 
         return keccak256(abi.encodePacked(where, who, permissionId));
     }
 
-    receive() external payable { emit ETHDeposited(msg.sender, msg.value); }
-    fallback() external payable { emit ETHDeposited(msg.sender, msg.value); }
+    receive() external payable {
+        emit ETHDeposited(msg.sender, msg.value);
+    }
+    fallback() external payable {
+        emit ETHDeposited(msg.sender, msg.value);
+    }
 }

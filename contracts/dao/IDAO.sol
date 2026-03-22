@@ -51,9 +51,5 @@ interface IDAO {
     /// @param who The address to check
     /// @param permissionId The permission identifier
     /// @return True if the address has the permission
-    function hasPermission(
-        address where,
-        address who,
-        bytes32 permissionId
-    ) external view returns (bool);
+    function hasPermission(address where, address who, bytes32 permissionId) external view returns (bool);
 }

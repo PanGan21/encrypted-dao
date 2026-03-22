@@ -80,22 +80,22 @@ If not set, defaults to `address(0)` (meta-transactions disabled).
 
 ## What Gets Deployed
 
-| Contract | Constructor Args |
-|---|---|
-| `DAO` | `(deployer, trustedForwarder)` |
-| `EncryptedGovernanceToken` | `("Encrypted Gov Token", "eGOV", trustedForwarder)` |
-| `EncryptedTokenVoting` | `(dao, token, 7 days, 20% quorum, 50% support, 100 min balance, trustedForwarder)` |
-| `EncryptedMultisig` (optional) | `(dao, signers[], threshold, 30 days, trustedForwarder)` |
+| Contract                       | Constructor Args                                                                   |
+| ------------------------------ | ---------------------------------------------------------------------------------- |
+| `DAO`                          | `(deployer, trustedForwarder)`                                                     |
+| `EncryptedGovernanceToken`     | `("Encrypted Gov Token", "eGOV", trustedForwarder)`                                |
+| `EncryptedTokenVoting`         | `(dao, token, 7 days, 20% quorum, 50% support, 100 min balance, trustedForwarder)` |
+| `EncryptedMultisig` (optional) | `(dao, signers[], threshold, 30 days, trustedForwarder)`                           |
 
 ## Network Configuration
 
 All contracts inherit `ZamaEthereumConfig` from `@fhevm/solidity`, which auto-resolves coprocessor addresses:
 
-| Network | Chain ID | ACL / Executor / KMS |
-|---|---|---|
-| Hardhat (local) | 31337 | Mock addresses (handled by `@fhevm/hardhat-plugin`) |
-| Sepolia | 11155111 | Zama's deployed Sepolia contracts |
-| Ethereum | 1 | Zama's deployed mainnet contracts |
+| Network         | Chain ID | ACL / Executor / KMS                                |
+| --------------- | -------- | --------------------------------------------------- |
+| Hardhat (local) | 31337    | Mock addresses (handled by `@fhevm/hardhat-plugin`) |
+| Sepolia         | 11155111 | Zama's deployed Sepolia contracts                   |
+| Ethereum        | 1        | Zama's deployed mainnet contracts                   |
 
 No manual address configuration is needed.
 

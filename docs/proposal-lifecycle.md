@@ -38,13 +38,13 @@ Each chunk is encrypted client-side using `fhevm.createEncryptedInput()` and sub
 
 **What happens on-chain:**
 
-| Step | Token Voting | Multisig |
-|---|---|---|
-| Store chunks | `FHE.fromExternal()` + `FHE.allowThis()` per chunk | Same |
-| Snapshot | `governanceToken.createSnapshot()` | N/A |
-| Initialize tallies | `encryptedForVotes = 0`, `encryptedAgainstVotes = 0` | `encryptedApprovals = 0` |
-| Set timing | `voteStart` / `voteEnd` (custom or default) | `createdAt` / `expiresAt` (automatic) |
-| Store cancel key | `cancelKeyHash` | Same |
+| Step               | Token Voting                                         | Multisig                              |
+| ------------------ | ---------------------------------------------------- | ------------------------------------- |
+| Store chunks       | `FHE.fromExternal()` + `FHE.allowThis()` per chunk   | Same                                  |
+| Snapshot           | `governanceToken.createSnapshot()`                   | N/A                                   |
+| Initialize tallies | `encryptedForVotes = 0`, `encryptedAgainstVotes = 0` | `encryptedApprovals = 0`              |
+| Set timing         | `voteStart` / `voteEnd` (custom or default)          | `createdAt` / `expiresAt` (automatic) |
+| Store cancel key   | `cancelKeyHash`                                      | Same                                  |
 
 **Privacy:** The proposer's identity is hidden (no membership check, no revert). The proposal content is encrypted on-chain.
 
@@ -56,8 +56,8 @@ Each chunk is encrypted client-side using `fhevm.createEncryptedInput()` and sub
 
 Members request decryption access to the encrypted calldata chunks before voting/approving. This grants `FHE.allow(chunk, caller)` on every chunk.
 
-| | Token Voting | Multisig |
-|---|---|---|
+|              | Token Voting                          | Multisig                    |
+| ------------ | ------------------------------------- | --------------------------- |
 | Who can view | Token holders (`isTokenHolder` check) | Signers (`_isSigner` check) |
 
 **Privacy:** The `ProposalViewed` event reveals that someone viewed the proposal, but with EIP-2771 meta-transactions, the viewer's real address is hidden behind the forwarder.
@@ -130,6 +130,7 @@ In both cases:
 4. The decoded boolean is stored as `resultApproved`
 
 **State after finalize:**
+
 - `resultApproved = true` → state becomes `Succeeded`
 - `resultApproved = false` → state becomes `Defeated` (lifecycle ends)
 
@@ -191,12 +192,12 @@ A cancelled proposal cannot be voted on, finalized, revealed, or executed.
 
 ## Summary Table
 
-| Phase | Function | Who Can Call | What's Revealed |
-|---|---|---|---|
-| 1. Create | `createProposal()` | Anyone | Proposal exists (not content or proposer) |
-| 2. View | `viewProposal()` | Members only | Someone viewed (not who, with EIP-2771) |
-| 3. Vote/Approve | `vote()` / `approve()` | Anyone | Someone participated (not who or how) |
-| 4. Finalize | `finalize()` | Anyone | Pass or fail (not tallies) |
-| 5. Reveal | `revealProposal()` | Anyone | Full proposal actions (targets, values, calldata) |
-| 6. Execute | `execute()` | Anyone | Execution results |
-| Cancel | `cancel()` | Cancel key holder | Proposal was cancelled |
+| Phase           | Function               | Who Can Call      | What's Revealed                                   |
+| --------------- | ---------------------- | ----------------- | ------------------------------------------------- |
+| 1. Create       | `createProposal()`     | Anyone            | Proposal exists (not content or proposer)         |
+| 2. View         | `viewProposal()`       | Members only      | Someone viewed (not who, with EIP-2771)           |
+| 3. Vote/Approve | `vote()` / `approve()` | Anyone            | Someone participated (not who or how)             |
+| 4. Finalize     | `finalize()`           | Anyone            | Pass or fail (not tallies)                        |
+| 5. Reveal       | `revealProposal()`     | Anyone            | Full proposal actions (targets, values, calldata) |
+| 6. Execute      | `execute()`            | Anyone            | Execution results                                 |
+| Cancel          | `cancel()`             | Cancel key holder | Proposal was cancelled                            |

@@ -56,7 +56,7 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     struct ProposalParams {
         uint64 startDate; // 0 = now
-        uint64 endDate;   // 0 = now + votingDuration
+        uint64 endDate; // 0 = now + votingDuration
     }
 
     struct Proposal {
@@ -97,8 +97,8 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
 
     uint256 public proposalCount;
     uint64 public votingDuration;
-    uint64 public minQuorumPct;   // 1-100
-    uint64 public minSupportPct;  // 1-100
+    uint64 public minQuorumPct; // 1-100
+    uint64 public minSupportPct; // 1-100
     uint64 public minProposerBalance;
 
     mapping(uint256 => Proposal) private _proposals;
@@ -230,11 +230,7 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
     /// @notice Cast an encrypted, token-weighted vote using snapshotted voting power.
     /// @dev Anyone can call — zero-balance voters contribute zero weight.
     /// Uses voting power snapshotted at proposal creation, preventing "vote and dump".
-    function vote(
-        uint256 proposalId,
-        externalEbool encryptedVote,
-        bytes calldata inputProof
-    ) external {
+    function vote(uint256 proposalId, externalEbool encryptedVote, bytes calldata inputProof) external {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         Proposal storage p = _proposals[proposalId];
         require(block.timestamp >= p.voteStart && block.timestamp <= p.voteEnd, "Voting not active");
@@ -406,7 +402,9 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
         return ProposalState.Pending;
     }
 
-    function getProposalInfo(uint256 proposalId)
+    function getProposalInfo(
+        uint256 proposalId
+    )
         external
         view
         returns (
@@ -437,11 +435,7 @@ contract EncryptedTokenVoting is ERC2771Context, ZamaEthereumConfig {
     }
 
     /// @notice Get revealed calldata chunks (only after reveal)
-    function getRevealedChunks(uint256 proposalId)
-        external
-        view
-        returns (uint256[] memory)
-    {
+    function getRevealedChunks(uint256 proposalId) external view returns (uint256[] memory) {
         require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
         require(_proposals[proposalId].revealed, "Not revealed");
         return _revealedChunks[proposalId];

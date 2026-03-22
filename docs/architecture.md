@@ -26,16 +26,19 @@ All contracts also inherit `ERC2771Context` for meta-transaction support.
 The central treasury and executor. Holds ETH and executes batched `Action[]` arrays when called by authorized plugins.
 
 **Key design decisions:**
+
 - Permission mappings are private — no public getter enumerates who has what role
 - Events emit only the permission ID, not the addresses involved
 - Uses `_msgSender()` throughout for meta-transaction compatibility
 
 **Permission system:**
+
 ```
 _permissionHash(where, who, permissionId) = keccak256(abi.encodePacked(where, who, permissionId))
 ```
 
 Two built-in permissions:
+
 - `ROOT_PERMISSION` — can grant/revoke other permissions
 - `EXECUTE_PERMISSION` — can call `dao.execute()`
 
@@ -121,6 +124,7 @@ Execution:
 ### FHE ACL (Access Control List)
 
 The FHE ACL controls who can decrypt encrypted values:
+
 - `FHE.allowThis(handle)` — the contract itself can use the value
 - `FHE.allow(handle, address)` — a specific address can decrypt
 - `FHE.allowTransient(handle, address)` — temporary access within a transaction
@@ -132,13 +136,13 @@ The governance token grants `FHE.allowTransient()` to the calling voting plugin 
 
 ## What is Public (by design)
 
-| Component | Why |
-|---|---|
-| Total token supply | Needed for quorum percentage calculation |
-| Member/signer count | Needed for threshold validation |
-| Quorum and threshold parameters | Governance rules should be transparent |
-| Delegation graph (who → whom) | Standard in governance (amounts are hidden) |
-| Proposal timing (start/end dates) | Voters need to know when to participate |
-| Pass/fail result | Required to decide whether to execute |
-| Revealed actions after approval | Required to execute on-chain |
-| Forwarder address in tx logs | Inherent to EIP-2771 (real caller is hidden) |
+| Component                         | Why                                          |
+| --------------------------------- | -------------------------------------------- |
+| Total token supply                | Needed for quorum percentage calculation     |
+| Member/signer count               | Needed for threshold validation              |
+| Quorum and threshold parameters   | Governance rules should be transparent       |
+| Delegation graph (who → whom)     | Standard in governance (amounts are hidden)  |
+| Proposal timing (start/end dates) | Voters need to know when to participate      |
+| Pass/fail result                  | Required to decide whether to execute        |
+| Revealed actions after approval   | Required to execute on-chain                 |
+| Forwarder address in tx logs      | Inherent to EIP-2771 (real caller is hidden) |

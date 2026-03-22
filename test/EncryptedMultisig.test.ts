@@ -39,13 +39,7 @@ describe("EncryptedMultisig", function () {
     it("should revert with empty signers array", async function () {
       const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(
-          await dao.getAddress(),
-          [],
-          1,
-          PROPOSAL_DURATION,
-          ethers.ZeroAddress,
-        ),
+        Multisig.deploy(await dao.getAddress(), [], 1, PROPOSAL_DURATION, ethers.ZeroAddress),
       ).to.be.revertedWith("Need at least one signer");
     });
 
@@ -78,13 +72,7 @@ describe("EncryptedMultisig", function () {
     it("should revert with zero duration", async function () {
       const Multisig = await ethers.getContractFactory("EncryptedMultisig");
       await expect(
-        Multisig.deploy(
-          await dao.getAddress(),
-          [alice.address],
-          1,
-          0,
-          ethers.ZeroAddress,
-        ),
+        Multisig.deploy(await dao.getAddress(), [alice.address], 1, 0, ethers.ZeroAddress),
       ).to.be.revertedWith("Invalid duration");
     });
 
