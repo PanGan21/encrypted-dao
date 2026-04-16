@@ -1,5 +1,7 @@
 # Encrypted DAO — Private Governance Framework using FHE
 
+> **Disclaimer:** This is a personal, educational project and is not an official Zama product or endorsed by Zama in any way. It is intended for learning and experimentation purposes only.
+
 A modular, Aragon-inspired DAO framework where governance is fully private. Built on Zama's fhEVM, every vote, balance, approval, and proposal is encrypted using Fully Homomorphic Encryption (FHE).
 
 ## Quick Start
